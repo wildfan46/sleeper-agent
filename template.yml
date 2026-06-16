@@ -1,0 +1,87 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SleeperAgent - Fantasy Football waiver wire assistant
+
+Globals:
+  Function:
+    Runtime: java25
+    MemorySize: 512          # Spring Boot needs headroom; tune down after profiling
+    Timeout: 60              # Cold start + multiple API calls (Sleeper, Open-Meteo)
+    Architectures: [arm64]   # Graviton2 — cheaper per ms, Java runs fine on it
+    Tracing: Active          # X-Ray
+    Environment:
+      Variables:
+        # Sleeper identifiers — not sensitive, stored as standard SSM strings
+        SLEEPER_LEAGUE_ID: '{{resolve:ssm:/sleeper-agent/prod/LEAGUE_ID}}'
+        SLEEPER_USER_ID: '{{resolve:ssm:/sleeper-agent/prod/USER_ID}}'
+        # Injected at deploy time from the SNS topic created below — no SSM needed
+        SNS_TOPIC_ARN: !Ref SleeperAgentNotificationTopic
+        # Tells Spring Cloud Function which @Bean to invoke
+        SPRING_CLOUD_FUNCTION_DEFINITION: 'rosterAnalysisFunction'
+
+Resources:
+
+  # SNS topic — SAM creates this on first deploy.
+  # After deploy, AWS sends a confirmation email to NOTIFICATION_EMAIL.
+  # Notifications won't arrive until you click that confirmation link.
+  SleeperAgentNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: sleeper-agent-notifications
+      Subscription:
+        - Protocol: email
+          Endpoint: '{{resolve:ssm:/sleeper-agent/prod/NOTIFICATION_EMAIL}}'
+
+  SleeperAgentLambda:
+    Type: AWS::Serverless::Function
+    Metadata:
+      # Tells sam build to invoke Maven; runs mvn package -DskipTests internally
+      BuildMethod: maven
+    Properties:
+      FunctionName: sleeper-agent
+      CodeUri: ./
+      # Spring Cloud Function's standard Lambda entry point
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Description: Deployed by GitHub Actions via SAM
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        # Read Sleeper league ID, user ID, and notification email from SSM
+        - Statement:
+            Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:GetParametersByPath
+            Resource: arn:aws:ssm:us-east-1:{{resolve:ssm:/sleeper-agent/prod/ACCOUNT_ID}}:parameter/sleeper-agent/prod/*
+        # Publish digest emails to the SNS topic
+        - Statement:
+            Effect: Allow
+            Action:
+              - sns:Publish
+            Resource: !Ref SleeperAgentNotificationTopic
+      Events:
+        # Tuesday 7:00 AM CDT (12:00 UTC) — post-MNF, before waivers process Tue/Wed night
+        TuesdayWaiverWindow:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 12 ? * 3 *)
+            Name: sleeper-agent-tuesday-waivers
+            Description: Pre-waiver roster and FA pool analysis
+            Enabled: true
+
+        # Sunday 11:00 AM CDT (16:00 UTC) — before 1:00 PM ET kickoffs
+        SundayPreGame:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 16 ? * 1 *)
+            Name: sleeper-agent-sunday-pregame
+            Description: Pre-kickoff weather and inactives check
+            Enabled: true
+
+Outputs:
+  FunctionName:
+    Value: !Ref SleeperAgentLambda
+  FunctionArn:
+    Value: !GetAtt SleeperAgentLambda.Arn
+  NotificationTopicArn:
+    Value: !Ref SleeperAgentNotificationTopic
