@@ -44,7 +44,7 @@ jobs:
       # sam build reads Metadata.BuildMethod: maven from template.yaml and runs
       # mvn package -DskipTests, then stages the JAR for deployment
       - name: Build
-        run: sam build
+        run: sam build --use-container
 
       - name: Deploy
         run: >
