@@ -40,8 +40,6 @@ jobs:
 
       - name: Setup AWS SAM
         uses: aws-actions/setup-sam@v2
-        with:
-          version: 'latest' # Ensures you get Java 25 support
 
       # sam build reads Metadata.BuildMethod: maven from template.yaml and runs
       # mvn package -DskipTests, then stages the JAR for deployment
