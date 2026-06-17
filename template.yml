@@ -34,12 +34,12 @@ Resources:
 
   SleeperAgentLambda:
     Type: AWS::Serverless::Function
-    Metadata:
-      # Tells sam build to invoke Maven; runs mvn package -DskipTests internally
-      BuildMethod: maven
     Properties:
       FunctionName: sleeper-agent
-      CodeUri: ./
+      # Points at the fat JAR produced by mvn package in the workflow.
+      # SAM stages this directly without needing to invoke a builder itself,
+      # which sidesteps the SAM CLI not yet supporting java25 as a BuildMethod.
+      CodeUri: target/sleeper-agent-0.0.1-SNAPSHOT.jar
       # Spring Cloud Function's standard Lambda entry point
       Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
       Description: Deployed by GitHub Actions via SAM

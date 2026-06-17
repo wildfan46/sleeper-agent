@@ -33,18 +33,19 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
-      # Run tests explicitly here — sam build uses -DskipTests internally,
-      # so this is the only place tests actually run in CI
+      # Run tests explicitly here — Package step below skips them
       - name: Run tests
         run: mvn test
 
-      - name: Setup AWS SAM
-        uses: aws-actions/setup-sam@v2
+      # Build the fat JAR — SAM will stage this directly rather than invoking
+      # its own Maven builder (which doesn't support java25 yet)
+      - name: Package
+        run: mvn package -DskipTests
 
-      # sam build reads Metadata.BuildMethod: maven from template.yaml and runs
-      # mvn package -DskipTests, then stages the JAR for deployment
-      - name: Build
-        run: sam build --use-container
+      # sam build stages the pre-built JAR from target/ into .aws-sam/build/
+      # No builder is invoked since CodeUri points at the JAR, not a directory
+      - name: Stage artifact
+        run: sam build
 
       - name: Deploy
         run: >
